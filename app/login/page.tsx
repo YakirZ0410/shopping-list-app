@@ -23,7 +23,8 @@ export default function LoginPage() {
   const [isVerifyingCode, setIsVerifyingCode] = useState(false);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const cleanEmail = email.trim();
-  const shouldShowCodeEntry = Boolean(sentEmail || cleanEmail);
+  const isEmailReadyForCode = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail);
+  const shouldShowCodeEntry = Boolean(sentEmail || isEmailReadyForCode);
 
   function saveDisplayName() {
     const cleanName = displayName.trim();
