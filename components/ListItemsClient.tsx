@@ -720,12 +720,13 @@ export default function ListItemsClient({
     return (
       <div
         key={item.id}
-        className={`flex min-h-16 items-center gap-3 border-b px-1 py-3 transition last:border-b-0 ${
+        className={`border-b px-1 py-3 transition last:border-b-0 ${
           isExactSearchMatch
             ? "border-blue-100 bg-blue-50/80"
             : "border-slate-100 bg-white"
         }`}
       >
+        <div className="flex min-h-16 items-center gap-3">
         <button
           type="button"
           onClick={() => toggleItem(item)}
@@ -744,10 +745,16 @@ export default function ListItemsClient({
           type="button"
           onClick={() => toggleItem(item)}
           className={`min-w-0 flex-1 text-right ${
-            item.is_bought ? "text-slate-400 line-through" : "text-slate-950"
+            item.is_bought ? "text-slate-400" : "text-slate-950"
           }`}
         >
-          <span className="block truncate text-base font-bold">{item.name}</span>
+          <span
+            className={`block truncate text-base font-bold ${
+              item.is_bought ? "line-through" : ""
+            }`}
+          >
+            {item.name}
+          </span>
           {creatorLabel && (
             <span className="mt-0.5 block truncate text-xs font-semibold text-slate-500 no-underline">
               {creatorLabel}
@@ -759,7 +766,7 @@ export default function ListItemsClient({
         </button>
 
         <div
-          className={`grid h-9 w-[5.5rem] shrink-0 grid-cols-[1.6rem_1fr_1.6rem] items-center rounded-full border ${
+          className={`grid h-9 w-[5rem] shrink-0 grid-cols-[1.45rem_1fr_1.45rem] items-center rounded-full border sm:w-[5.5rem] sm:grid-cols-[1.6rem_1fr_1.6rem] ${
             item.is_bought
               ? "border-slate-200 bg-slate-50 text-slate-400"
               : "border-slate-200 bg-[#f4f5f8] text-slate-800"
@@ -790,14 +797,15 @@ export default function ListItemsClient({
             <Plus size={14} strokeWidth={2.8} />
           </button>
         </div>
+        </div>
 
-        <div className="flex shrink-0 gap-1">
+        <div className="mt-2 flex justify-end gap-1 pe-1">
           <button
             type="button"
             onClick={() => startEditing(item)}
             aria-label={`ערוך את ${item.name}`}
             title="ערוך"
-            className="grid h-10 w-10 place-items-center rounded-full text-[#3880ff] hover:bg-blue-50"
+            className="grid h-9 w-9 place-items-center rounded-full text-[#3880ff] hover:bg-blue-50"
           >
             <Pencil size={18} strokeWidth={2.4} />
           </button>
@@ -806,7 +814,7 @@ export default function ListItemsClient({
             onClick={() => requestDeleteItem(item)}
             aria-label={`מחק את ${item.name}`}
             title="מחק"
-            className="grid h-10 w-10 place-items-center rounded-full text-red-600 hover:bg-red-50"
+            className="grid h-9 w-9 place-items-center rounded-full text-red-600 hover:bg-red-50"
           >
             <X size={20} strokeWidth={2.6} />
           </button>
