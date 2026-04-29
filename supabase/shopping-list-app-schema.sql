@@ -61,6 +61,23 @@ alter table public.list_members enable row level security;
 alter table public.shopping_list_items enable row level security;
 
 do $$
+begin
+  if exists (
+    select 1
+    from pg_publication
+    where pubname = 'supabase_realtime'
+  ) and not exists (
+    select 1
+    from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'shopping_list_items'
+  ) then
+    alter publication supabase_realtime add table public.shopping_list_items;
+  end if;
+end $$;
+
+do $$
 declare
   policy_record record;
 begin

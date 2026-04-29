@@ -11,7 +11,7 @@ import {
   Plus,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type ShoppingListItem = {
   id: string;
@@ -95,6 +95,7 @@ export default function ListItemsClient({
 }: ListItemsClientProps) {
   const supabase = useMemo(() => createClient(), []);
   const inputRef = useRef<HTMLInputElement>(null);
+  const refreshTimeoutRef = useRef<number | null>(null);
 
   const [items, setItems] = useState<ShoppingListItem[]>([]);
   const [newItemText, setNewItemText] = useState("");
@@ -137,17 +138,11 @@ export default function ListItemsClient({
     : boughtItems;
   const visibleItemsCount = visiblePendingItems.length + visibleBoughtItems.length;
 
-  useEffect(() => {
-    let isActive = true;
-
-    async function loadItems() {
+  const loadItems = useCallback(
+    async () => {
       const { data, error } = await supabase.rpc("get_shopping_list_items", {
         target_list_id: listId,
       });
-
-      if (!isActive) {
-        return;
-      }
 
       if (!error) {
         setIsLoading(false);
@@ -180,10 +175,6 @@ export default function ListItemsClient({
         .eq("list_id", listId)
         .order("created_at", { ascending: true });
 
-      if (!isActive) {
-        return;
-      }
-
       setIsLoading(false);
 
       if (fallbackError) {
@@ -202,14 +193,51 @@ export default function ListItemsClient({
           ),
         })) as ShoppingListItem[],
       );
-    }
+    },
+    [listId, supabase],
+  );
 
-    loadItems();
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      void loadItems();
+    }, 0);
 
     return () => {
-      isActive = false;
+      window.clearTimeout(timeoutId);
     };
-  }, [listId, supabase]);
+  }, [loadItems]);
+
+  useEffect(() => {
+    const channel = supabase
+      .channel(`shopping-list-items-${listId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "shopping_list_items",
+        },
+        () => {
+          if (refreshTimeoutRef.current) {
+            window.clearTimeout(refreshTimeoutRef.current);
+          }
+
+          refreshTimeoutRef.current = window.setTimeout(() => {
+            void loadItems();
+          }, 250);
+        },
+      )
+      .subscribe();
+
+    return () => {
+      if (refreshTimeoutRef.current) {
+        window.clearTimeout(refreshTimeoutRef.current);
+        refreshTimeoutRef.current = null;
+      }
+
+      void supabase.removeChannel(channel);
+    };
+  }, [listId, loadItems, supabase]);
 
   useEffect(() => {
     if (!message) {
