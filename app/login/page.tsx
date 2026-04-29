@@ -22,6 +22,8 @@ export default function LoginPage() {
   const [isEmailLoading, setIsEmailLoading] = useState(false);
   const [isVerifyingCode, setIsVerifyingCode] = useState(false);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
+  const cleanEmail = email.trim();
+  const shouldShowCodeEntry = Boolean(sentEmail || cleanEmail);
 
   function saveDisplayName() {
     const cleanName = displayName.trim();
@@ -53,7 +55,6 @@ export default function LoginPage() {
 
   async function signInWithEmail() {
     const cleanName = authMode === "signup" ? saveDisplayName() : "";
-    const cleanEmail = email.trim();
 
     setMessage("");
     setSentEmail("");
@@ -92,10 +93,11 @@ export default function LoginPage() {
 
   async function verifyEmailCode() {
     const cleanCode = otpCode.trim().replace(/\s+/g, "");
+    const verificationEmail = sentEmail || cleanEmail;
 
     setMessage("");
 
-    if (!sentEmail) {
+    if (!verificationEmail) {
       setMessage("צריך לשלוח קוד למייל לפני שמתחברים");
       return;
     }
@@ -108,7 +110,7 @@ export default function LoginPage() {
     setIsVerifyingCode(true);
 
     const { error } = await supabase.auth.verifyOtp({
-      email: sentEmail,
+      email: verificationEmail,
       token: cleanCode,
       type: authMode === "signup" ? "signup" : "email",
     });
@@ -235,16 +237,18 @@ export default function LoginPage() {
               נשלח אליך קוד חד-פעמי. אין צורך בסיסמה.
             </p>
 
-            {sentEmail && (
+            {shouldShowCodeEntry && (
               <div className="mt-4 rounded-2xl border border-emerald-100 bg-emerald-50 p-4 text-center">
                 <div className="mx-auto mb-2 grid h-10 w-10 place-items-center rounded-full bg-white text-emerald-600 shadow-sm shadow-emerald-100">
                   <CheckCircle2 size={22} strokeWidth={2.6} />
                 </div>
                 <p className="text-base font-black text-slate-950">
-                  בדוק את המייל שלך
+                  {sentEmail ? "בדוק את המייל שלך" : "יש לך קוד?"}
                 </p>
                 <p className="mt-1 break-words text-sm font-semibold leading-6 text-slate-600">
-                  שלחנו קוד חד-פעמי לכתובת {sentEmail}
+                  {sentEmail
+                    ? `שלחנו קוד חד-פעמי לכתובת ${sentEmail}`
+                    : "אחרי שליחת הקוד, הזן אותו כאן בלי לצאת מהאפליקציה."}
                 </p>
                 <input
                   type="text"
@@ -263,7 +267,7 @@ export default function LoginPage() {
                 />
                 <AppButton
                   onClick={() => void verifyEmailCode()}
-                  disabled={isVerifyingCode || isEmailLoading}
+                  disabled={isVerifyingCode || isEmailLoading || !otpCode.trim()}
                   className="mt-3"
                 >
                   {isVerifyingCode ? "בודק קוד..." : "כניסה לאפליקציה"}
