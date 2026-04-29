@@ -197,6 +197,16 @@ export default function ListItemsClient({
     [listId, supabase],
   );
 
+  const refreshItemsSoon = useCallback(() => {
+    if (refreshTimeoutRef.current) {
+      window.clearTimeout(refreshTimeoutRef.current);
+    }
+
+    refreshTimeoutRef.current = window.setTimeout(() => {
+      void loadItems();
+    }, 250);
+  }, [loadItems]);
+
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
       void loadItems();
@@ -213,21 +223,39 @@ export default function ListItemsClient({
       .on(
         "postgres_changes",
         {
-          event: "*",
+          event: "INSERT",
+          schema: "public",
+          table: "shopping_list_items",
+          filter: `list_id=eq.${listId}`,
+        },
+        refreshItemsSoon,
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "shopping_list_items",
+          filter: `list_id=eq.${listId}`,
+        },
+        refreshItemsSoon,
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "DELETE",
           schema: "public",
           table: "shopping_list_items",
         },
-        () => {
-          if (refreshTimeoutRef.current) {
-            window.clearTimeout(refreshTimeoutRef.current);
-          }
-
-          refreshTimeoutRef.current = window.setTimeout(() => {
-            void loadItems();
-          }, 250);
-        },
+        refreshItemsSoon,
       )
       .subscribe();
+
+    const fallbackRefreshIntervalId = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        void loadItems();
+      }
+    }, 5000);
 
     return () => {
       if (refreshTimeoutRef.current) {
@@ -235,9 +263,10 @@ export default function ListItemsClient({
         refreshTimeoutRef.current = null;
       }
 
+      window.clearInterval(fallbackRefreshIntervalId);
       void supabase.removeChannel(channel);
     };
-  }, [listId, loadItems, supabase]);
+  }, [listId, loadItems, refreshItemsSoon, supabase]);
 
   useEffect(() => {
     if (!message) {
