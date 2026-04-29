@@ -3,20 +3,24 @@
 import { AppButton, AppPanel, AppScreen } from "@/components/AppUi";
 import { createClient } from "@/lib/supabaseClient";
 import { CheckCircle2, Mail, ShoppingBasket, UserRound } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 
 const PENDING_DISPLAY_NAME_KEY = "shopping-list-display-name";
 type AuthMode = "signin" | "signup";
 
 export default function LoginPage() {
+  const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
 
   const [authMode, setAuthMode] = useState<AuthMode>("signin");
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
+  const [otpCode, setOtpCode] = useState("");
   const [message, setMessage] = useState("");
   const [sentEmail, setSentEmail] = useState("");
   const [isEmailLoading, setIsEmailLoading] = useState(false);
+  const [isVerifyingCode, setIsVerifyingCode] = useState(false);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
 
   function saveDisplayName() {
@@ -70,6 +74,7 @@ export default function LoginPage() {
       email: cleanEmail,
       options: {
         emailRedirectTo: `${window.location.origin}/auth/callback`,
+        shouldCreateUser: authMode === "signup",
         data: cleanName ? { display_name: cleanName } : undefined,
       },
     });
@@ -82,6 +87,41 @@ export default function LoginPage() {
     }
 
     setSentEmail(cleanEmail);
+    setOtpCode("");
+  }
+
+  async function verifyEmailCode() {
+    const cleanCode = otpCode.trim().replace(/\s+/g, "");
+
+    setMessage("");
+
+    if (!sentEmail) {
+      setMessage("צריך לשלוח קוד למייל לפני שמתחברים");
+      return;
+    }
+
+    if (!cleanCode) {
+      setMessage("נא להזין את הקוד שקיבלת במייל");
+      return;
+    }
+
+    setIsVerifyingCode(true);
+
+    const { error } = await supabase.auth.verifyOtp({
+      email: sentEmail,
+      token: cleanCode,
+      type: authMode === "signup" ? "signup" : "email",
+    });
+
+    setIsVerifyingCode(false);
+
+    if (error) {
+      setMessage(error.message);
+      return;
+    }
+
+    router.replace("/lists");
+    router.refresh();
   }
 
   return (
@@ -111,6 +151,7 @@ export default function LoginPage() {
                 setAuthMode("signin");
                 setMessage("");
                 setSentEmail("");
+                setOtpCode("");
               }}
               className={`min-h-10 rounded-xl px-3 text-sm font-black transition ${
                 authMode === "signin"
@@ -126,6 +167,7 @@ export default function LoginPage() {
                 setAuthMode("signup");
                 setMessage("");
                 setSentEmail("");
+                setOtpCode("");
               }}
               className={`min-h-10 rounded-xl px-3 text-sm font-black transition ${
                 authMode === "signup"
@@ -172,6 +214,7 @@ export default function LoginPage() {
                 onChange={(event) => {
                   setEmail(event.target.value);
                   setSentEmail("");
+                  setOtpCode("");
                 }}
                 className="min-w-0 flex-1 bg-transparent py-3 text-base text-slate-950 outline-none placeholder:text-slate-400"
               />
@@ -179,17 +222,17 @@ export default function LoginPage() {
 
             <AppButton
               onClick={() => void signInWithEmail()}
-              disabled={isEmailLoading || isGoogleLoading}
+              disabled={isEmailLoading || isVerifyingCode || isGoogleLoading}
             >
               {isEmailLoading
                 ? "שולח..."
                 : authMode === "signup"
-                  ? "שלח קישור הרשמה"
-                  : "שלח קישור התחברות"}
+                  ? "שלח קוד הרשמה"
+                  : "שלח קוד התחברות"}
             </AppButton>
 
             <p className="mt-3 text-center text-xs font-semibold leading-5 text-slate-500">
-              נשלח אליך קישור חד-פעמי. אין צורך בסיסמה.
+              נשלח אליך קוד חד-פעמי. אין צורך בסיסמה.
             </p>
 
             {sentEmail && (
@@ -201,12 +244,34 @@ export default function LoginPage() {
                   בדוק את המייל שלך
                 </p>
                 <p className="mt-1 break-words text-sm font-semibold leading-6 text-slate-600">
-                  שלחנו קישור לכתובת {sentEmail}
+                  שלחנו קוד חד-פעמי לכתובת {sentEmail}
                 </p>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  placeholder="הזן קוד"
+                  value={otpCode}
+                  onChange={(event) => setOtpCode(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      void verifyEmailCode();
+                    }
+                  }}
+                  className="mt-3 min-h-12 w-full rounded-2xl border border-emerald-100 bg-white px-4 py-3 text-center text-lg font-black tracking-[0.25em] text-slate-950 outline-none placeholder:text-sm placeholder:font-bold placeholder:tracking-normal placeholder:text-slate-400 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
+                />
+                <AppButton
+                  onClick={() => void verifyEmailCode()}
+                  disabled={isVerifyingCode || isEmailLoading}
+                  className="mt-3"
+                >
+                  {isVerifyingCode ? "בודק קוד..." : "כניסה לאפליקציה"}
+                </AppButton>
                 <button
                   type="button"
                   onClick={() => void signInWithEmail()}
-                  disabled={isEmailLoading}
+                  disabled={isEmailLoading || isVerifyingCode}
                   className="mt-3 min-h-9 rounded-full bg-white px-4 py-2 text-sm font-black text-emerald-700 shadow-sm shadow-emerald-100 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {isEmailLoading ? "שולח..." : "שלח שוב"}
@@ -223,7 +288,7 @@ export default function LoginPage() {
             <AppButton
               onClick={() => void signInWithGoogle()}
               variant="secondary"
-              disabled={isEmailLoading || isGoogleLoading}
+              disabled={isEmailLoading || isVerifyingCode || isGoogleLoading}
             >
               {isGoogleLoading ? "מעביר ל-Google..." : "המשך עם Google"}
             </AppButton>
