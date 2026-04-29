@@ -23,8 +23,7 @@ export default function LoginPage() {
   const [isVerifyingCode, setIsVerifyingCode] = useState(false);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const cleanEmail = email.trim();
-  const isEmailReadyForCode = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail);
-  const shouldShowCodeEntry = Boolean(sentEmail || isEmailReadyForCode);
+  const shouldShowCodeEntry = Boolean(sentEmail);
 
   function saveDisplayName() {
     const cleanName = displayName.trim();
@@ -84,6 +83,19 @@ export default function LoginPage() {
     setIsEmailLoading(false);
 
     if (error) {
+      const errorMessage = error.message.toLowerCase();
+
+      if (
+        authMode === "signin" &&
+        (errorMessage.includes("signup") ||
+          errorMessage.includes("signups") ||
+          errorMessage.includes("not found") ||
+          errorMessage.includes("user"))
+      ) {
+        setMessage("נראה שזו הפעם הראשונה שלך כאן. צריך להירשם פעם אחת לפני שמתחברים.");
+        return;
+      }
+
       setMessage(error.message);
       return;
     }
