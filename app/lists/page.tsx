@@ -5,10 +5,51 @@ import CopyAccessCodeButton from "@/components/CopyAccessCodeButton";
 import ListMembershipActionButton from "@/components/ListMembershipActionButton";
 import LogoutButton from "@/components/LogoutButton";
 import { createClient } from "@/lib/supabaseClient";
-import { CheckCircle2, ChevronLeft, Hash, Plus, Search } from "lucide-react";
+import {
+  CheckCircle2,
+  ChevronLeft,
+  Hash,
+  ListPlus,
+  Plus,
+  Search,
+  Share2,
+  ShoppingCart,
+  UserCheck,
+  X,
+  type LucideIcon,
+} from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
+
+const ONBOARDING_STORAGE_KEY = "shopping-list-onboarding-seen";
+
+const onboardingSteps: Array<{
+  title: string;
+  description: string;
+  Icon: LucideIcon;
+}> = [
+  {
+    title: "יוצרים רשימה",
+    description: "פתח רשימת קניות חדשה לכל בית, אירוע או קניה משותפת.",
+    Icon: ListPlus,
+  },
+  {
+    title: "משתפים קוד הצטרפות",
+    description: "כל רשימה מקבלת קוד. שולחים אותו למי שרוצה להצטרף.",
+    Icon: Share2,
+  },
+  {
+    title: "מאשרים חברים",
+    description: "מנהל הרשימה מאשר בקשות הצטרפות לפני שחברים רואים את הרשימה.",
+    Icon: UserCheck,
+  },
+  {
+    title: "קונים ביחד בזמן אמת",
+    description: "מוסיפים מוצרים, מעדכנים כמויות ומסמנים מה נקנה מכל מכשיר.",
+    Icon: ShoppingCart,
+  },
+];
 
 type ListRow = {
   id: string;
@@ -52,6 +93,7 @@ export default function ListsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
   const [isLoading, setIsLoading] = useState(true);
+  const [showOnboarding, setShowOnboarding] = useState(false);
 
   const ownedCount = lists.filter((list) => list.role === "owner").length;
   const joinedCount = lists.filter((list) => list.role === "member").length;
@@ -74,6 +116,23 @@ export default function ListsPage() {
 
           return searchableText.includes(normalizedSearchQuery);
         });
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      if (localStorage.getItem(ONBOARDING_STORAGE_KEY) !== "true") {
+        setShowOnboarding(true);
+      }
+    }, 450);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    }
+  }, []);
+
+  function closeOnboarding() {
+    localStorage.setItem(ONBOARDING_STORAGE_KEY, "true");
+    setShowOnboarding(false);
+  }
 
   useEffect(() => {
     let isActive = true;
@@ -294,6 +353,13 @@ export default function ListsPage() {
         <span className="rounded-full bg-white px-3 py-1.5 text-sm font-bold text-slate-700 shadow-sm shadow-slate-200/80">
           {joinedCount} משותפות
         </span>
+        <button
+          type="button"
+          onClick={() => setShowOnboarding(true)}
+          className="rounded-full bg-white px-3 py-1.5 text-sm font-bold text-[#3880ff] shadow-sm shadow-slate-200/80 transition hover:bg-blue-50"
+        >
+          איך זה עובד?
+        </button>
       </div>
 
       <div className="grid grid-cols-2 gap-2">
@@ -477,6 +543,84 @@ export default function ListsPage() {
           })}
         </div>
       </AppPanel>
+
+      {showOnboarding && (
+        <div className="fixed inset-0 z-[120] flex items-end justify-center bg-slate-950/35 px-3 pb-3 pt-[max(1rem,env(safe-area-inset-top))] backdrop-blur-[2px] sm:items-center">
+          <button
+            type="button"
+            aria-label="סגור הדרכה"
+            className="absolute inset-0 h-full w-full cursor-default"
+            onClick={closeOnboarding}
+          />
+
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="onboarding-title"
+            className="relative z-10 w-full max-w-md overflow-hidden rounded-[28px] bg-white shadow-2xl shadow-slate-950/20"
+          >
+            <div className="flex justify-end px-4 pt-4">
+              <button
+                type="button"
+                onClick={closeOnboarding}
+                aria-label="סגור"
+                title="סגור"
+                className="grid h-9 w-9 place-items-center rounded-full bg-slate-100 text-slate-700 transition hover:bg-slate-200 active:scale-95"
+              >
+                <X size={18} strokeWidth={2.6} />
+              </button>
+            </div>
+
+            <div className="px-5 pb-5">
+              <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-blue-50 text-[#3880ff]">
+                <ShoppingCart size={26} strokeWidth={2.5} />
+              </div>
+
+              <div className="mt-4 text-center">
+                <p className="text-sm font-black text-[#3880ff]">ברוך הבא</p>
+                <h2
+                  id="onboarding-title"
+                  className="mt-1 text-2xl font-black text-slate-950"
+                >
+                  ככה עובדים עם הרשימות
+                </h2>
+                <p className="mx-auto mt-2 max-w-xs text-sm leading-6 text-slate-500">
+                  כמה צעדים קצרים, ואז אפשר להתחיל לנהל קניות יחד.
+                </p>
+              </div>
+
+              <div className="mt-5 space-y-3">
+                {onboardingSteps.map(({ title, description, Icon }) => (
+                  <div
+                    key={title}
+                    className="flex gap-3 rounded-2xl border border-slate-100 bg-slate-50 p-3"
+                  >
+                    <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-white text-[#3880ff] shadow-sm shadow-slate-200/70">
+                      <Icon size={20} strokeWidth={2.5} />
+                    </div>
+                    <div className="min-w-0">
+                      <h3 className="text-sm font-black text-slate-950">
+                        {title}
+                      </h3>
+                      <p className="mt-0.5 text-sm leading-5 text-slate-500">
+                        {description}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <button
+                type="button"
+                onClick={closeOnboarding}
+                className="mt-5 min-h-12 w-full rounded-xl bg-[#3880ff] px-5 py-3 text-base font-black text-white shadow-sm shadow-blue-200 transition hover:bg-[#3171e0] active:scale-[0.99]"
+              >
+                הבנתי, בוא נתחיל
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
     </AppScreen>
   );
 }
