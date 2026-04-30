@@ -169,13 +169,43 @@ export default function LoginPage() {
       type: authMode === "signup" ? "signup" : "email",
     });
 
-    setIsVerifyingCode(false);
-
     if (error) {
+      const errorMessage = error.message.toLowerCase();
+      const canRetryAsExistingUser =
+        authMode === "signup" &&
+        (errorMessage.includes("token") ||
+          errorMessage.includes("expired") ||
+          errorMessage.includes("invalid"));
+
+      if (canRetryAsExistingUser) {
+        const { error: signInError } = await supabase.auth.verifyOtp({
+          email: verificationEmail,
+          token: cleanCode,
+          type: "email",
+        });
+
+        setIsVerifyingCode(false);
+
+        if (!signInError) {
+          router.replace("/lists");
+          router.refresh();
+          return;
+        }
+
+        setAuthMode("signin");
+        setAcceptedTerms(false);
+        setMessage(
+          "המייל הזה כבר רשום למערכת. עבור ללשונית התחברות ושלח קוד התחברות חדש.",
+        );
+        return;
+      }
+
+      setIsVerifyingCode(false);
       setMessage(error.message);
       return;
     }
 
+    setIsVerifyingCode(false);
     router.replace("/lists");
     router.refresh();
   }
