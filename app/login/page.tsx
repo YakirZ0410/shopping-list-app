@@ -3,6 +3,7 @@
 import { AppButton, AppPanel, AppScreen } from "@/components/AppUi";
 import { createClient } from "@/lib/supabaseClient";
 import { CheckCircle2, Mail, ShoppingBasket, UserRound } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
@@ -23,6 +24,7 @@ export default function LoginPage() {
   const [isVerifyingCode, setIsVerifyingCode] = useState(false);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [keepSignedIn, setKeepSignedIn] = useState(true);
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
   const cleanEmail = email.trim();
   const shouldShowCodeEntry = Boolean(sentEmail);
 
@@ -82,6 +84,11 @@ export default function LoginPage() {
 
     if (authMode === "signup" && !cleanName) {
       setMessage("נא להזין שם כדי שנדע איך להציג אותך ברשימות");
+      return;
+    }
+
+    if (authMode === "signup" && !acceptedTerms) {
+      setMessage("צריך לאשר את תנאי השימוש ומדיניות הפרטיות כדי להירשם");
       return;
     }
 
@@ -188,6 +195,7 @@ export default function LoginPage() {
                 setMessage("");
                 setSentEmail("");
                 setOtpCode("");
+                setAcceptedTerms(false);
               }}
               className={`min-h-10 rounded-xl px-3 text-sm font-black transition ${
                 authMode === "signin"
@@ -273,9 +281,34 @@ export default function LoginPage() {
               </span>
             </label>
 
+            {authMode === "signup" && (
+              <label className="mb-4 flex items-start gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-right shadow-sm shadow-slate-100">
+                <input
+                  type="checkbox"
+                  checked={acceptedTerms}
+                  onChange={(event) => setAcceptedTerms(event.target.checked)}
+                  className="mt-1 h-4 w-4 shrink-0 accent-[#3880ff]"
+                />
+                <span className="min-w-0 text-sm leading-6 text-slate-600">
+                  אני מאשר/ת את{" "}
+                  <Link
+                    href="/terms"
+                    className="font-black text-[#3880ff] underline-offset-4 hover:underline"
+                  >
+                    תנאי השימוש ומדיניות הפרטיות
+                  </Link>
+                </span>
+              </label>
+            )}
+
             <AppButton
               onClick={() => void signInWithEmail()}
-              disabled={isEmailLoading || isVerifyingCode || isGoogleLoading}
+              disabled={
+                isEmailLoading ||
+                isVerifyingCode ||
+                isGoogleLoading ||
+                (authMode === "signup" && !acceptedTerms)
+              }
             >
               {isEmailLoading
                 ? "שולח..."
