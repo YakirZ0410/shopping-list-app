@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   ChevronLeft,
   Hash,
+  LifeBuoy,
   ListPlus,
   Plus,
   Search,
@@ -116,6 +117,23 @@ export default function ListsPage() {
 
           return searchableText.includes(normalizedSearchQuery);
         });
+  const supportSubject = "דיווח על בעיה באפליקציית רשימת קניות";
+  const supportBody = [
+    "היי,",
+    "",
+    "יש לי בעיה באפליקציית רשימת קניות:",
+    "",
+    "מה ניסיתי לעשות:",
+    "",
+    "מה קרה בפועל:",
+    "",
+    "המכשיר/דפדפן שלי:",
+    "",
+    `מייל משתמש: ${user?.email ?? ""}`,
+  ].join("\n");
+  const supportHref = `mailto:?subject=${encodeURIComponent(
+    supportSubject,
+  )}&body=${encodeURIComponent(supportBody)}`;
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -360,6 +378,13 @@ export default function ListsPage() {
         >
           איך זה עובד?
         </button>
+        <a
+          href={supportHref}
+          className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1.5 text-sm font-bold text-slate-700 shadow-sm shadow-slate-200/80 transition hover:bg-slate-50"
+        >
+          <LifeBuoy size={15} strokeWidth={2.6} />
+          <span>דווח על בעיה</span>
+        </a>
       </div>
 
       <div className="grid grid-cols-2 gap-2">
