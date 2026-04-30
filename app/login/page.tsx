@@ -10,6 +10,17 @@ import { useEffect, useMemo, useState } from "react";
 const PENDING_DISPLAY_NAME_KEY = "shopping-list-display-name";
 type AuthMode = "signin" | "signup";
 
+function isOtpCodeError(message: string) {
+  const cleanMessage = message.toLowerCase();
+
+  return (
+    cleanMessage.includes("token") ||
+    cleanMessage.includes("expired") ||
+    cleanMessage.includes("invalid") ||
+    cleanMessage.includes("otp")
+  );
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
@@ -170,12 +181,8 @@ export default function LoginPage() {
     });
 
     if (error) {
-      const errorMessage = error.message.toLowerCase();
       const canRetryAsExistingUser =
-        authMode === "signup" &&
-        (errorMessage.includes("token") ||
-          errorMessage.includes("expired") ||
-          errorMessage.includes("invalid"));
+        authMode === "signup" && isOtpCodeError(error.message);
 
       if (canRetryAsExistingUser) {
         const { error: signInError } = await supabase.auth.verifyOtp({
@@ -192,6 +199,11 @@ export default function LoginPage() {
           return;
         }
 
+        if (isOtpCodeError(signInError.message)) {
+          setMessage("קוד האימות שגוי או שפג תוקפו. בדוק את הקוד או שלח קוד חדש.");
+          return;
+        }
+
         setAuthMode("signin");
         setAcceptedTerms(false);
         setMessage(
@@ -201,6 +213,11 @@ export default function LoginPage() {
       }
 
       setIsVerifyingCode(false);
+      if (isOtpCodeError(error.message)) {
+        setMessage("קוד האימות שגוי או שפג תוקפו. בדוק את הקוד או שלח קוד חדש.");
+        return;
+      }
+
       setMessage(error.message);
       return;
     }
