@@ -4,7 +4,7 @@ import { AppButton, AppPanel, AppScreen } from "@/components/AppUi";
 import { createClient } from "@/lib/supabaseClient";
 import { CheckCircle2, Mail, ShoppingBasket, UserRound } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 const PENDING_DISPLAY_NAME_KEY = "shopping-list-display-name";
 type AuthMode = "signin" | "signup";
@@ -22,8 +22,29 @@ export default function LoginPage() {
   const [isEmailLoading, setIsEmailLoading] = useState(false);
   const [isVerifyingCode, setIsVerifyingCode] = useState(false);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
+  const [keepSignedIn, setKeepSignedIn] = useState(true);
   const cleanEmail = email.trim();
   const shouldShowCodeEntry = Boolean(sentEmail);
+
+  useEffect(() => {
+    let isActive = true;
+
+    async function redirectSignedInUser() {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (isActive && session) {
+        router.replace("/lists");
+      }
+    }
+
+    void redirectSignedInUser();
+
+    return () => {
+      isActive = false;
+    };
+  }, [router, supabase]);
 
   function saveDisplayName() {
     const cleanName = displayName.trim();
@@ -234,6 +255,23 @@ export default function LoginPage() {
                 className="min-w-0 flex-1 bg-transparent py-3 text-base text-slate-950 outline-none placeholder:text-slate-400"
               />
             </div>
+
+            <label className="mb-4 flex items-start gap-3 rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-right">
+              <input
+                type="checkbox"
+                checked={keepSignedIn}
+                onChange={(event) => setKeepSignedIn(event.target.checked)}
+                className="mt-1 h-4 w-4 shrink-0 accent-[#3880ff]"
+              />
+              <span className="min-w-0">
+                <span className="block text-sm font-black text-slate-950">
+                  השאר אותי מחובר במכשיר הזה
+                </span>
+                <span className="mt-0.5 block text-xs font-semibold leading-5 text-slate-600">
+                  מומלץ בקיצור דרך במסך הבית, כדי שלא תצטרך להזין מייל וקוד בכל פתיחה.
+                </span>
+              </span>
+            </label>
 
             <AppButton
               onClick={() => void signInWithEmail()}
