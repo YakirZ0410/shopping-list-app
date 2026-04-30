@@ -13,6 +13,7 @@ import {
   ListPlus,
   Plus,
   Search,
+  Send,
   Share2,
   ShoppingCart,
   UserCheck,
@@ -21,7 +22,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 
 const ONBOARDING_STORAGE_KEY = "shopping-list-onboarding-seen";
 
@@ -95,6 +96,12 @@ export default function ListsPage() {
   const [errorMessage, setErrorMessage] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const [isSupportOpen, setIsSupportOpen] = useState(false);
+  const [supportMessage, setSupportMessage] = useState("");
+  const [supportStatus, setSupportStatus] = useState<
+    "idle" | "sending" | "sent" | "error"
+  >("idle");
+  const [supportError, setSupportError] = useState("");
 
   const ownedCount = lists.filter((list) => list.role === "owner").length;
   const joinedCount = lists.filter((list) => list.role === "member").length;
@@ -117,23 +124,45 @@ export default function ListsPage() {
 
           return searchableText.includes(normalizedSearchQuery);
         });
-  const supportSubject = "דיווח על בעיה באפליקציית רשימת קניות";
-  const supportBody = [
-    "היי,",
-    "",
-    "יש לי בעיה באפליקציית רשימת קניות:",
-    "",
-    "מה ניסיתי לעשות:",
-    "",
-    "מה קרה בפועל:",
-    "",
-    "המכשיר/דפדפן שלי:",
-    "",
-    `מייל משתמש: ${user?.email ?? ""}`,
-  ].join("\n");
-  const supportHref = `mailto:?subject=${encodeURIComponent(
-    supportSubject,
-  )}&body=${encodeURIComponent(supportBody)}`;
+  async function handleSupportSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const trimmedMessage = supportMessage.trim();
+
+    if (trimmedMessage.length < 5) {
+      setSupportStatus("error");
+      setSupportError("כדאי לכתוב כמה מילים כדי שנוכל להבין מה קרה.");
+      return;
+    }
+
+    setSupportStatus("sending");
+    setSupportError("");
+
+    try {
+      const response = await fetch("/api/support", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: trimmedMessage }),
+      });
+      const result = (await response.json().catch(() => null)) as {
+        error?: string;
+      } | null;
+
+      if (!response.ok) {
+        throw new Error(result?.error ?? "לא הצלחנו לשלוח את ההודעה.");
+      }
+
+      setSupportMessage("");
+      setSupportStatus("sent");
+    } catch (error) {
+      setSupportStatus("error");
+      setSupportError(
+        error instanceof Error
+          ? error.message
+          : "לא הצלחנו לשלוח את ההודעה. נסה שוב עוד רגע.",
+      );
+    }
+  }
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -378,13 +407,18 @@ export default function ListsPage() {
         >
           איך זה עובד?
         </button>
-        <a
-          href={supportHref}
+        <button
+          type="button"
+          onClick={() => {
+            setIsSupportOpen(true);
+            setSupportStatus("idle");
+            setSupportError("");
+          }}
           className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1.5 text-sm font-bold text-slate-700 shadow-sm shadow-slate-200/80 transition hover:bg-slate-50"
         >
           <LifeBuoy size={15} strokeWidth={2.6} />
           <span>דווח על בעיה</span>
-        </a>
+        </button>
       </div>
 
       <div className="grid grid-cols-2 gap-2">
@@ -644,6 +678,95 @@ export default function ListsPage() {
               </button>
             </div>
           </section>
+        </div>
+      )}
+
+      {isSupportOpen && (
+        <div
+          className="fixed inset-0 z-[130] flex items-end justify-center bg-slate-950/35 px-3 pb-3 pt-[max(1rem,env(safe-area-inset-top))] backdrop-blur-[2px] sm:items-center"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="support-title"
+        >
+          <form
+            onSubmit={handleSupportSubmit}
+            className="w-full max-w-md rounded-[28px] border border-slate-200 bg-white p-4 shadow-2xl shadow-slate-950/20"
+          >
+            <div className="mb-3 flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wide text-[#3880ff]">
+                  צור קשר
+                </p>
+                <h2
+                  id="support-title"
+                  className="mt-1 text-xl font-black text-slate-950"
+                >
+                  מה הבעיה שנתקלת בה?
+                </h2>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsSupportOpen(false)}
+                aria-label="סגור"
+                title="סגור"
+                className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-slate-100 text-slate-700 transition hover:bg-slate-200 active:scale-95"
+              >
+                <X size={18} strokeWidth={2.6} />
+              </button>
+            </div>
+
+            <p className="mb-3 text-sm font-semibold leading-6 text-slate-500">
+              כתוב כאן מה קרה. המייל של המשתמש שלך יצורף אוטומטית לדיווח.
+            </p>
+
+            <textarea
+              value={supportMessage}
+              onChange={(event) => {
+                setSupportMessage(event.target.value);
+                if (supportStatus !== "sending") {
+                  setSupportStatus("idle");
+                  setSupportError("");
+                }
+              }}
+              rows={5}
+              maxLength={2000}
+              placeholder="לדוגמה: ניסיתי להוסיף מוצר והוא לא הופיע אצל חבר..."
+              className="w-full resize-none rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-base font-semibold leading-7 text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-[#3880ff] focus:bg-white focus:ring-4 focus:ring-blue-100"
+            />
+
+            <div className="mt-2 flex items-center justify-between gap-3 text-xs font-bold text-slate-400">
+              <span>{supportMessage.length}/2000</span>
+              {supportStatus === "sent" && (
+                <span className="text-emerald-600">ההודעה נשלחה בהצלחה</span>
+              )}
+            </div>
+
+            {supportStatus === "error" && supportError && (
+              <p className="mt-3 rounded-2xl bg-red-50 px-4 py-3 text-sm font-bold leading-6 text-red-700">
+                {supportError}
+              </p>
+            )}
+
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <AppButton
+                type="button"
+                variant="secondary"
+                onClick={() => setIsSupportOpen(false)}
+                className="min-h-11 px-3 py-2 text-sm"
+              >
+                ביטול
+              </AppButton>
+              <AppButton
+                type="submit"
+                disabled={supportStatus === "sending"}
+                className="min-h-11 gap-2 px-3 py-2 text-sm"
+              >
+                <Send size={16} strokeWidth={2.8} />
+                {supportStatus === "sending" ? "שולח..." : "שלח דיווח"}
+              </AppButton>
+            </div>
+          </form>
         </div>
       )}
     </AppScreen>
