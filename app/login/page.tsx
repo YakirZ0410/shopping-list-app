@@ -124,6 +124,19 @@ export default function LoginPage() {
         return;
       }
 
+      if (
+        authMode === "signup" &&
+        (errorMessage.includes("already") ||
+          errorMessage.includes("registered") ||
+          errorMessage.includes("exists") ||
+          errorMessage.includes("user"))
+      ) {
+        setAuthMode("signin");
+        setAcceptedTerms(false);
+        setMessage("המייל הזה כבר רשום למערכת. אפשר להתחבר דרך לשונית התחברות.");
+        return;
+      }
+
       setMessage(error.message);
       return;
     }
