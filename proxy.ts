@@ -1,14 +1,14 @@
 import { type NextRequest } from "next/server";
 import { updateSession } from "./lib/supabaseMiddleware";
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   return await updateSession(request);
 }
 
 export const config = {
   matcher: [
     /*
-     * Run middleware on all routes except:
+     * Run proxy on all routes except:
      * - static files
      * - images
      * - favicon

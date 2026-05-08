@@ -11,7 +11,14 @@ import {
   Plus,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type SetStateAction,
+} from "react";
 
 type ShoppingListItem = {
   id: string;
@@ -41,6 +48,8 @@ type PendingConfirmation =
   | { type: "clearBought"; count: number }
   | { type: "clearAll"; count: number };
 
+const shoppingListItemsCache = new Map<string, ShoppingListItem[]>();
+
 function parseItemNames(value: string) {
   return value
     .split(/\r?\n|,/)
@@ -58,6 +67,22 @@ function normalizeItemName(value: string) {
 
 function changeQuantityBy(currentValue: number, delta: number) {
   return cleanQuantity(currentValue + delta);
+}
+
+function sortItemsByCreatedAt(items: ShoppingListItem[]) {
+  return [...items].sort(
+    (firstItem, secondItem) =>
+      new Date(firstItem.created_at).getTime() -
+      new Date(secondItem.created_at).getTime(),
+  );
+}
+
+function formatItemDate(value: string) {
+  return new Intl.DateTimeFormat("he-IL", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "2-digit",
+  }).format(new Date(value));
 }
 
 function isMissingShoppingListItemsRpcError(message: string) {
@@ -89,6 +114,14 @@ function getUserDisplayName(
   );
 }
 
+function createOptimisticItemId() {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return `pending-${crypto.randomUUID()}`;
+  }
+
+  return `pending-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
 export default function ListItemsClient({
   listId,
   stickyTop = 0,
@@ -96,8 +129,9 @@ export default function ListItemsClient({
   const supabase = useMemo(() => createClient(), []);
   const inputRef = useRef<HTMLInputElement>(null);
   const refreshTimeoutRef = useRef<number | null>(null);
+  const cachedItems = shoppingListItemsCache.get(listId);
 
-  const [items, setItems] = useState<ShoppingListItem[]>([]);
+  const [items, setItems] = useState<ShoppingListItem[]>(() => cachedItems ?? []);
   const [newItemText, setNewItemText] = useState("");
   const [quantity, setQuantity] = useState(1);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
@@ -108,7 +142,7 @@ export default function ListItemsClient({
     string | null
   >(null);
   const [message, setMessage] = useState("");
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(!cachedItems);
   const [isAdding, setIsAdding] = useState(false);
   const [isActionsMenuOpen, setIsActionsMenuOpen] = useState(false);
   const [clearingMode, setClearingMode] = useState<"all" | "bought" | null>(
@@ -119,23 +153,54 @@ export default function ListItemsClient({
   const [recentlyDeletedItem, setRecentlyDeletedItem] =
     useState<ShoppingListItem | null>(null);
 
-  const pendingItems = items.filter((item) => !item.is_bought);
-  const boughtItems = items.filter((item) => item.is_bought);
+  const setCachedItems = useCallback(
+    (value: SetStateAction<ShoppingListItem[]>) => {
+      setItems((currentItems) => {
+        const nextItems =
+          typeof value === "function" ? value(currentItems) : value;
+
+        shoppingListItemsCache.set(listId, nextItems);
+        return nextItems;
+      });
+    },
+    [listId],
+  );
+
+  const pendingItems = useMemo(
+    () => items.filter((item) => !item.is_bought),
+    [items],
+  );
+  const boughtItems = useMemo(
+    () => items.filter((item) => item.is_bought),
+    [items],
+  );
   const searchTerm = normalizeItemName(newItemText);
   const isSearching = searchTerm.length > 0;
-  const exactExistingItem = isSearching
-    ? items.find((item) => normalizeItemName(item.name) === searchTerm)
-    : undefined;
-  const visiblePendingItems = isSearching
-    ? pendingItems.filter((item) =>
-        normalizeItemName(item.name).includes(searchTerm),
-      )
-    : pendingItems;
-  const visibleBoughtItems = isSearching
-    ? boughtItems.filter((item) =>
-        normalizeItemName(item.name).includes(searchTerm),
-      )
-    : boughtItems;
+  const exactExistingItem = useMemo(
+    () =>
+      isSearching
+        ? items.find((item) => normalizeItemName(item.name) === searchTerm)
+        : undefined,
+    [isSearching, items, searchTerm],
+  );
+  const visiblePendingItems = useMemo(
+    () =>
+      isSearching
+        ? pendingItems.filter((item) =>
+            normalizeItemName(item.name).includes(searchTerm),
+          )
+        : pendingItems,
+    [isSearching, pendingItems, searchTerm],
+  );
+  const visibleBoughtItems = useMemo(
+    () =>
+      isSearching
+        ? boughtItems.filter((item) =>
+            normalizeItemName(item.name).includes(searchTerm),
+          )
+        : boughtItems,
+    [boughtItems, isSearching, searchTerm],
+  );
   const visibleItemsCount = visiblePendingItems.length + visibleBoughtItems.length;
 
   const loadItems = useCallback(
@@ -146,7 +211,7 @@ export default function ListItemsClient({
 
       if (!error) {
         setIsLoading(false);
-        setItems((data ?? []) as ShoppingListItem[]);
+        setCachedItems((data ?? []) as ShoppingListItem[]);
         return;
       }
 
@@ -182,7 +247,7 @@ export default function ListItemsClient({
         return;
       }
 
-      setItems(
+      setCachedItems(
         (fallbackData ?? []).map((item) => ({
           ...item,
           created_by_name: item.created_by
@@ -194,7 +259,7 @@ export default function ListItemsClient({
         })) as ShoppingListItem[],
       );
     },
-    [listId, supabase],
+    [listId, setCachedItems, supabase],
   );
 
   const refreshItemsSoon = useCallback(() => {
@@ -209,13 +274,23 @@ export default function ListItemsClient({
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
+      const listCachedItems = shoppingListItemsCache.get(listId);
+
+      if (listCachedItems) {
+        setItems(listCachedItems);
+        setIsLoading(false);
+      } else {
+        setItems([]);
+        setIsLoading(true);
+      }
+
       void loadItems();
     }, 0);
 
     return () => {
       window.clearTimeout(timeoutId);
     };
-  }, [loadItems]);
+  }, [listId, loadItems]);
 
   useEffect(() => {
     const channel = supabase
@@ -251,22 +326,35 @@ export default function ListItemsClient({
       )
       .subscribe();
 
-    const fallbackRefreshIntervalId = window.setInterval(() => {
-      if (document.visibilityState === "visible") {
-        void loadItems();
-      }
-    }, 5000);
-
     return () => {
       if (refreshTimeoutRef.current) {
         window.clearTimeout(refreshTimeoutRef.current);
         refreshTimeoutRef.current = null;
       }
 
-      window.clearInterval(fallbackRefreshIntervalId);
       void supabase.removeChannel(channel);
     };
-  }, [listId, loadItems, refreshItemsSoon, supabase]);
+  }, [listId, refreshItemsSoon, supabase]);
+
+  useEffect(() => {
+    function refreshOnFocus() {
+      void loadItems();
+    }
+
+    function refreshWhenVisible() {
+      if (document.visibilityState === "visible") {
+        void loadItems();
+      }
+    }
+
+    window.addEventListener("focus", refreshOnFocus);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+
+    return () => {
+      window.removeEventListener("focus", refreshOnFocus);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
+  }, [loadItems]);
 
   useEffect(() => {
     if (!message) {
@@ -338,6 +426,22 @@ export default function ListItemsClient({
     }
 
     const creatorName = getUserDisplayName(user);
+    const optimisticItems = itemNames.map((name) => ({
+      id: createOptimisticItemId(),
+      list_id: listId,
+      name,
+      quantity: itemQuantity,
+      is_bought: false,
+      created_by: user.id,
+      created_by_name: creatorName,
+      is_created_by_current_user: true,
+      created_at: new Date().toISOString(),
+    })) satisfies ShoppingListItem[];
+
+    setCachedItems((currentItems) => [...currentItems, ...optimisticItems]);
+    setNewItemText("");
+    setQuantity(1);
+    inputRef.current?.focus();
 
     const { data, error } = await supabase
       .from("shopping_list_items")
@@ -355,26 +459,37 @@ export default function ListItemsClient({
 
     if (error) {
       setMessage(error.message);
+      setCachedItems((currentItems) =>
+        currentItems.filter(
+          (currentItem) =>
+            !optimisticItems.some((item) => item.id === currentItem.id),
+        ),
+      );
       return;
     }
 
-    setItems((currentItems) => [
-      ...currentItems,
-      ...(data ?? []).map((item) => ({
-        ...item,
-        created_by_name: creatorName,
-        is_created_by_current_user: true,
-      })) as ShoppingListItem[],
-    ]);
-    setNewItemText("");
-    setQuantity(1);
-    inputRef.current?.focus();
+    const savedItems = (data ?? []).map((item) => ({
+      ...item,
+      created_by_name: creatorName,
+      is_created_by_current_user: true,
+    })) as ShoppingListItem[];
+
+    setCachedItems((currentItems) => {
+      const optimisticIds = new Set(optimisticItems.map((item) => item.id));
+      const savedIds = new Set(savedItems.map((item) => item.id));
+      return sortItemsByCreatedAt([
+        ...currentItems.filter(
+          (item) => !optimisticIds.has(item.id) && !savedIds.has(item.id),
+        ),
+        ...savedItems,
+      ]);
+    });
   }
 
   async function toggleItem(item: ShoppingListItem) {
     const nextValue = !item.is_bought;
 
-    setItems((currentItems) =>
+    setCachedItems((currentItems) =>
       currentItems.map((currentItem) =>
         currentItem.id === item.id
           ? { ...currentItem, is_bought: nextValue }
@@ -389,7 +504,7 @@ export default function ListItemsClient({
 
     if (error) {
       setMessage(error.message);
-      setItems((currentItems) =>
+      setCachedItems((currentItems) =>
         currentItems.map((currentItem) =>
           currentItem.id === item.id ? item : currentItem,
         ),
@@ -408,7 +523,7 @@ export default function ListItemsClient({
 
     setMessage("");
     setUpdatingQuantityItemId(item.id);
-    setItems((currentItems) =>
+    setCachedItems((currentItems) =>
       currentItems.map((currentItem) =>
         currentItem.id === item.id
           ? { ...currentItem, quantity: cleanedQuantity }
@@ -425,7 +540,7 @@ export default function ListItemsClient({
 
     if (error) {
       setMessage(error.message);
-      setItems(previousItems);
+      setCachedItems(previousItems);
     }
   }
 
@@ -455,7 +570,7 @@ export default function ListItemsClient({
     }
 
     setSavingItemId(item.id);
-    setItems((currentItems) =>
+    setCachedItems((currentItems) =>
       currentItems.map((currentItem) =>
         currentItem.id === item.id
           ? { ...currentItem, name: nextName, quantity: nextQuantity }
@@ -472,7 +587,7 @@ export default function ListItemsClient({
 
     if (error) {
       setMessage(error.message);
-      setItems(previousItems);
+      setCachedItems(previousItems);
       return;
     }
 
@@ -484,7 +599,7 @@ export default function ListItemsClient({
 
     setMessage("");
     setRecentlyDeletedItem(null);
-    setItems((currentItems) =>
+    setCachedItems((currentItems) =>
       currentItems.filter((currentItem) => currentItem.id !== item.id),
     );
 
@@ -495,7 +610,7 @@ export default function ListItemsClient({
 
     if (error) {
       setMessage(error.message);
-      setItems(previousItems);
+      setCachedItems(previousItems);
       return;
     }
 
@@ -515,16 +630,12 @@ export default function ListItemsClient({
 
     setMessage("");
     setRecentlyDeletedItem(null);
-    setItems((currentItems) => {
+    setCachedItems((currentItems) => {
       if (currentItems.some((item) => item.id === itemToRestore.id)) {
         return currentItems;
       }
 
-      return [...currentItems, itemToRestore].sort(
-        (firstItem, secondItem) =>
-          new Date(firstItem.created_at).getTime() -
-          new Date(secondItem.created_at).getTime(),
-      );
+      return sortItemsByCreatedAt([...currentItems, itemToRestore]);
     });
 
     const { error } = await supabase.from("shopping_list_items").insert({
@@ -539,7 +650,7 @@ export default function ListItemsClient({
 
     if (error) {
       setMessage(error.message);
-      setItems((currentItems) =>
+      setCachedItems((currentItems) =>
         currentItems.filter((item) => item.id !== itemToRestore.id),
       );
     }
@@ -563,7 +674,7 @@ export default function ListItemsClient({
 
     setMessage("");
     setClearingMode("bought");
-    setItems((currentItems) =>
+    setCachedItems((currentItems) =>
       currentItems.filter((currentItem) => !currentItem.is_bought),
     );
 
@@ -577,7 +688,7 @@ export default function ListItemsClient({
 
     if (error) {
       setMessage(error.message);
-      setItems(previousItems);
+      setCachedItems(previousItems);
     }
   }
 
@@ -599,7 +710,7 @@ export default function ListItemsClient({
 
     setMessage("");
     setClearingMode("all");
-    setItems([]);
+    setCachedItems([]);
 
     const { error } = await supabase
       .from("shopping_list_items")
@@ -610,7 +721,7 @@ export default function ListItemsClient({
 
     if (error) {
       setMessage(error.message);
-      setItems(previousItems);
+      setCachedItems(previousItems);
     }
   }
 
@@ -670,6 +781,12 @@ export default function ListItemsClient({
       : item.created_by_name
         ? `הוסיף: ${item.created_by_name}`
         : null;
+    const itemMetaLabel = [
+      creatorLabel,
+      `נוסף ב-${formatItemDate(item.created_at)}`,
+    ]
+      .filter(Boolean)
+      .join(" · ");
 
     if (isEditing) {
       return (
@@ -755,9 +872,9 @@ export default function ListItemsClient({
           >
             {item.name}
           </span>
-          {creatorLabel && (
+          {itemMetaLabel && (
             <span className="mt-0.5 block truncate text-xs font-semibold text-slate-500 no-underline">
-              {creatorLabel}
+              {itemMetaLabel}
             </span>
           )}
           <span className="sr-only">
