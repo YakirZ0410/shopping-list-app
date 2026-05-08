@@ -781,12 +781,7 @@ export default function ListItemsClient({
       : item.created_by_name
         ? `הוסיף: ${item.created_by_name}`
         : null;
-    const itemMetaLabel = [
-      creatorLabel,
-      `נוסף ב-${formatItemDate(item.created_at)}`,
-    ]
-      .filter(Boolean)
-      .join(" · ");
+    const itemDateLabel = `נוסף ב-${formatItemDate(item.created_at)}`;
 
     if (isEditing) {
       return (
@@ -872,11 +867,10 @@ export default function ListItemsClient({
           >
             {item.name}
           </span>
-          {itemMetaLabel && (
-            <span className="mt-0.5 block truncate text-xs font-semibold text-slate-500 no-underline">
-              {itemMetaLabel}
-            </span>
-          )}
+          <span className="mt-0.5 block space-y-0.5 text-xs font-semibold text-slate-500 no-underline">
+            {creatorLabel && <span className="block truncate">{creatorLabel}</span>}
+            <span className="block truncate">{itemDateLabel}</span>
+          </span>
           <span className="sr-only">
             כמות: {item.quantity}
           </span>
