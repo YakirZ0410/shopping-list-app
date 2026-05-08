@@ -49,6 +49,7 @@ type PendingConfirmation =
   | { type: "clearAll"; count: number };
 
 const shoppingListItemsCache = new Map<string, ShoppingListItem[]>();
+const BOUGHT_ITEM_SETTLE_DELAY_MS = 650;
 
 function parseItemNames(value: string) {
   return value
@@ -129,6 +130,7 @@ export default function ListItemsClient({
   const supabase = useMemo(() => createClient(), []);
   const inputRef = useRef<HTMLInputElement>(null);
   const refreshTimeoutRef = useRef<number | null>(null);
+  const boughtItemSettleTimeoutsRef = useRef<Map<string, number>>(new Map());
   const cachedItems = shoppingListItemsCache.get(listId);
 
   const [items, setItems] = useState<ShoppingListItem[]>(() => cachedItems ?? []);
@@ -152,6 +154,9 @@ export default function ListItemsClient({
     useState<PendingConfirmation | null>(null);
   const [recentlyDeletedItem, setRecentlyDeletedItem] =
     useState<ShoppingListItem | null>(null);
+  const [settlingBoughtItemIds, setSettlingBoughtItemIds] = useState<
+    Set<string>
+  >(() => new Set());
 
   const setCachedItems = useCallback(
     (value: SetStateAction<ShoppingListItem[]>) => {
@@ -166,13 +171,67 @@ export default function ListItemsClient({
     [listId],
   );
 
+  const releaseSettlingBoughtItem = useCallback((itemId: string) => {
+    const timeoutId = boughtItemSettleTimeoutsRef.current.get(itemId);
+
+    if (timeoutId) {
+      window.clearTimeout(timeoutId);
+      boughtItemSettleTimeoutsRef.current.delete(itemId);
+    }
+
+    setSettlingBoughtItemIds((currentIds) => {
+      if (!currentIds.has(itemId)) {
+        return currentIds;
+      }
+
+      const nextIds = new Set(currentIds);
+      nextIds.delete(itemId);
+      return nextIds;
+    });
+  }, []);
+
+  const holdBoughtItemInPlace = useCallback((itemId: string) => {
+    const existingTimeoutId = boughtItemSettleTimeoutsRef.current.get(itemId);
+
+    if (existingTimeoutId) {
+      window.clearTimeout(existingTimeoutId);
+    }
+
+    setSettlingBoughtItemIds((currentIds) => {
+      const nextIds = new Set(currentIds);
+      nextIds.add(itemId);
+      return nextIds;
+    });
+
+    const timeoutId = window.setTimeout(() => {
+      boughtItemSettleTimeoutsRef.current.delete(itemId);
+      setSettlingBoughtItemIds((currentIds) => {
+        if (!currentIds.has(itemId)) {
+          return currentIds;
+        }
+
+        const nextIds = new Set(currentIds);
+        nextIds.delete(itemId);
+        return nextIds;
+      });
+    }, BOUGHT_ITEM_SETTLE_DELAY_MS);
+
+    boughtItemSettleTimeoutsRef.current.set(itemId, timeoutId);
+  }, []);
+
   const pendingItems = useMemo(
-    () => items.filter((item) => !item.is_bought),
-    [items],
+    () =>
+      items.filter(
+        (item) => !item.is_bought || settlingBoughtItemIds.has(item.id),
+      ),
+    [items, settlingBoughtItemIds],
   );
   const boughtItems = useMemo(
-    () => items.filter((item) => item.is_bought),
-    [items],
+    () =>
+      items.filter(
+        (item) => item.is_bought && !settlingBoughtItemIds.has(item.id),
+      ),
+    [items, settlingBoughtItemIds],
   );
   const searchTerm = normalizeItemName(newItemText);
   const isSearching = searchTerm.length > 0;
@@ -284,6 +343,12 @@ export default function ListItemsClient({
         setIsLoading(true);
       }
 
+      setSettlingBoughtItemIds(new Set());
+      for (const itemSettleTimeoutId of boughtItemSettleTimeoutsRef.current.values()) {
+        window.clearTimeout(itemSettleTimeoutId);
+      }
+      boughtItemSettleTimeoutsRef.current.clear();
+
       void loadItems();
     }, 0);
 
@@ -291,6 +356,18 @@ export default function ListItemsClient({
       window.clearTimeout(timeoutId);
     };
   }, [listId, loadItems]);
+
+  useEffect(() => {
+    const boughtItemSettleTimeouts = boughtItemSettleTimeoutsRef.current;
+
+    return () => {
+      for (const timeoutId of boughtItemSettleTimeouts.values()) {
+        window.clearTimeout(timeoutId);
+      }
+
+      boughtItemSettleTimeouts.clear();
+    };
+  }, []);
 
   useEffect(() => {
     const channel = supabase
@@ -489,6 +566,12 @@ export default function ListItemsClient({
   async function toggleItem(item: ShoppingListItem) {
     const nextValue = !item.is_bought;
 
+    if (nextValue) {
+      holdBoughtItemInPlace(item.id);
+    } else {
+      releaseSettlingBoughtItem(item.id);
+    }
+
     setCachedItems((currentItems) =>
       currentItems.map((currentItem) =>
         currentItem.id === item.id
@@ -504,6 +587,7 @@ export default function ListItemsClient({
 
     if (error) {
       setMessage(error.message);
+      releaseSettlingBoughtItem(item.id);
       setCachedItems((currentItems) =>
         currentItems.map((currentItem) =>
           currentItem.id === item.id ? item : currentItem,
