@@ -48,8 +48,13 @@ type PendingConfirmation =
   | { type: "clearBought"; count: number }
   | { type: "clearAll"; count: number };
 
+type PendingBoughtToggle = {
+  isBought: boolean;
+};
+
 const shoppingListItemsCache = new Map<string, ShoppingListItem[]>();
-const ITEM_SETTLE_DELAY_MS = 650;
+const DISPLAY_GROUP_COMMIT_DELAY_MS = 650;
+const SERVER_TOGGLE_OVERRIDE_MS = 1200;
 
 function parseItemNames(value: string) {
   return value
@@ -130,8 +135,11 @@ export default function ListItemsClient({
   const supabase = useMemo(() => createClient(), []);
   const inputRef = useRef<HTMLInputElement>(null);
   const refreshTimeoutRef = useRef<number | null>(null);
-  const boughtItemSettleTimeoutsRef = useRef<Map<string, number>>(new Map());
-  const pendingItemSettleTimeoutsRef = useRef<Map<string, number>>(new Map());
+  const displayGroupCommitTimeoutRef = useRef<number | null>(null);
+  const pendingToggleReleaseTimeoutsRef = useRef<Map<string, number>>(new Map());
+  const pendingBoughtTogglesRef = useRef<Map<string, PendingBoughtToggle>>(
+    new Map(),
+  );
   const cachedItems = shoppingListItemsCache.get(listId);
 
   const [items, setItems] = useState<ShoppingListItem[]>(() => cachedItems ?? []);
@@ -155,12 +163,9 @@ export default function ListItemsClient({
     useState<PendingConfirmation | null>(null);
   const [recentlyDeletedItem, setRecentlyDeletedItem] =
     useState<ShoppingListItem | null>(null);
-  const [settlingBoughtItemIds, setSettlingBoughtItemIds] = useState<
-    Set<string>
-  >(() => new Set());
-  const [settlingPendingItemIds, setSettlingPendingItemIds] = useState<
-    Set<string>
-  >(() => new Set());
+  const [displayGroupByItemId, setDisplayGroupByItemId] = useState<
+    Map<string, boolean>
+  >(() => new Map((cachedItems ?? []).map((item) => [item.id, item.is_bought])));
 
   const setCachedItems = useCallback(
     (value: SetStateAction<ShoppingListItem[]>) => {
@@ -175,119 +180,99 @@ export default function ListItemsClient({
     [listId],
   );
 
-  const releaseSettlingBoughtItem = useCallback((itemId: string) => {
-    const timeoutId = boughtItemSettleTimeoutsRef.current.get(itemId);
-
-    if (timeoutId) {
-      window.clearTimeout(timeoutId);
-      boughtItemSettleTimeoutsRef.current.delete(itemId);
+  const applyPendingBoughtToggles = useCallback((nextItems: ShoppingListItem[]) => {
+    if (pendingBoughtTogglesRef.current.size === 0) {
+      return nextItems;
     }
 
-    setSettlingBoughtItemIds((currentIds) => {
-      if (!currentIds.has(itemId)) {
-        return currentIds;
+    return nextItems.map((item) => {
+      const pendingToggle = pendingBoughtTogglesRef.current.get(item.id);
+
+      if (!pendingToggle) {
+        return item;
       }
 
-      const nextIds = new Set(currentIds);
-      nextIds.delete(itemId);
-      return nextIds;
+      return { ...item, is_bought: pendingToggle.isBought };
     });
   }, []);
 
-  const holdBoughtItemInPlace = useCallback((itemId: string) => {
-    const existingTimeoutId = boughtItemSettleTimeoutsRef.current.get(itemId);
+  const clearPendingBoughtToggle = useCallback((itemId: string) => {
+    const timeoutId = pendingToggleReleaseTimeoutsRef.current.get(itemId);
+
+    if (timeoutId) {
+      window.clearTimeout(timeoutId);
+      pendingToggleReleaseTimeoutsRef.current.delete(itemId);
+    }
+
+    pendingBoughtTogglesRef.current.delete(itemId);
+  }, []);
+
+  const releasePendingBoughtToggleSoon = useCallback((itemId: string) => {
+    const existingTimeoutId = pendingToggleReleaseTimeoutsRef.current.get(itemId);
 
     if (existingTimeoutId) {
       window.clearTimeout(existingTimeoutId);
     }
 
-    setSettlingBoughtItemIds((currentIds) => {
-      const nextIds = new Set(currentIds);
-      nextIds.add(itemId);
-      return nextIds;
-    });
-
     const timeoutId = window.setTimeout(() => {
-      boughtItemSettleTimeoutsRef.current.delete(itemId);
-      setSettlingBoughtItemIds((currentIds) => {
-        if (!currentIds.has(itemId)) {
-          return currentIds;
-        }
+      pendingToggleReleaseTimeoutsRef.current.delete(itemId);
+      pendingBoughtTogglesRef.current.delete(itemId);
+    }, SERVER_TOGGLE_OVERRIDE_MS);
 
-        const nextIds = new Set(currentIds);
-        nextIds.delete(itemId);
-        return nextIds;
-      });
-    }, ITEM_SETTLE_DELAY_MS);
-
-    boughtItemSettleTimeoutsRef.current.set(itemId, timeoutId);
+    pendingToggleReleaseTimeoutsRef.current.set(itemId, timeoutId);
   }, []);
 
-  const releaseSettlingPendingItem = useCallback((itemId: string) => {
-    const timeoutId = pendingItemSettleTimeoutsRef.current.get(itemId);
+  const syncDisplayGroupsToItems = useCallback((nextItems: ShoppingListItem[]) => {
+    setDisplayGroupByItemId(
+      new Map(nextItems.map((item) => [item.id, item.is_bought])),
+    );
+  }, []);
 
-    if (timeoutId) {
-      window.clearTimeout(timeoutId);
-      pendingItemSettleTimeoutsRef.current.delete(itemId);
+  const scheduleDisplayGroupCommit = useCallback(() => {
+    if (displayGroupCommitTimeoutRef.current) {
+      window.clearTimeout(displayGroupCommitTimeoutRef.current);
     }
 
-    setSettlingPendingItemIds((currentIds) => {
-      if (!currentIds.has(itemId)) {
-        return currentIds;
+    displayGroupCommitTimeoutRef.current = window.setTimeout(() => {
+      displayGroupCommitTimeoutRef.current = null;
+      setDisplayGroupByItemId(
+        new Map(
+          shoppingListItemsCache.get(listId)?.map((item) => [
+            item.id,
+            item.is_bought,
+          ]) ?? [],
+        ),
+      );
+    }, DISPLAY_GROUP_COMMIT_DELAY_MS);
+  }, [listId]);
+
+  const visibleItemGroups = useMemo(() => {
+    const pending: ShoppingListItem[] = [];
+    const bought: ShoppingListItem[] = [];
+
+    for (const item of items) {
+      const isDisplayedAsBought =
+        displayGroupByItemId.get(item.id) ?? item.is_bought;
+
+      if (isDisplayedAsBought) {
+        bought.push(item);
+      } else {
+        pending.push(item);
       }
-
-      const nextIds = new Set(currentIds);
-      nextIds.delete(itemId);
-      return nextIds;
-    });
-  }, []);
-
-  const holdPendingItemInPlace = useCallback((itemId: string) => {
-    const existingTimeoutId = pendingItemSettleTimeoutsRef.current.get(itemId);
-
-    if (existingTimeoutId) {
-      window.clearTimeout(existingTimeoutId);
     }
 
-    setSettlingPendingItemIds((currentIds) => {
-      const nextIds = new Set(currentIds);
-      nextIds.add(itemId);
-      return nextIds;
-    });
+    return { pending, bought };
+  }, [displayGroupByItemId, items]);
 
-    const timeoutId = window.setTimeout(() => {
-      pendingItemSettleTimeoutsRef.current.delete(itemId);
-      setSettlingPendingItemIds((currentIds) => {
-        if (!currentIds.has(itemId)) {
-          return currentIds;
-        }
-
-        const nextIds = new Set(currentIds);
-        nextIds.delete(itemId);
-        return nextIds;
-      });
-    }, ITEM_SETTLE_DELAY_MS);
-
-    pendingItemSettleTimeoutsRef.current.set(itemId, timeoutId);
-  }, []);
-
-  const pendingItems = useMemo(
-    () =>
-      items.filter(
-        (item) =>
-          (!item.is_bought && !settlingPendingItemIds.has(item.id)) ||
-          settlingBoughtItemIds.has(item.id),
-      ),
-    [items, settlingBoughtItemIds, settlingPendingItemIds],
+  const pendingItems = visibleItemGroups.pending;
+  const boughtItems = visibleItemGroups.bought;
+  const pendingItemsCount = useMemo(
+    () => items.filter((item) => !item.is_bought).length,
+    [items],
   );
-  const boughtItems = useMemo(
-    () =>
-      items.filter(
-        (item) =>
-          (item.is_bought && !settlingBoughtItemIds.has(item.id)) ||
-          settlingPendingItemIds.has(item.id),
-      ),
-    [items, settlingBoughtItemIds, settlingPendingItemIds],
+  const boughtItemsCount = useMemo(
+    () => items.filter((item) => item.is_bought).length,
+    [items],
   );
   const searchTerm = normalizeItemName(newItemText);
   const isSearching = searchTerm.length > 0;
@@ -325,8 +310,20 @@ export default function ListItemsClient({
       });
 
       if (!error) {
+        const nextItems = applyPendingBoughtToggles(
+          (data ?? []) as ShoppingListItem[],
+        );
+
         setIsLoading(false);
-        setCachedItems((data ?? []) as ShoppingListItem[]);
+        setCachedItems(nextItems);
+
+        if (
+          !displayGroupCommitTimeoutRef.current &&
+          pendingBoughtTogglesRef.current.size === 0
+        ) {
+          syncDisplayGroupsToItems(nextItems);
+        }
+
         return;
       }
 
@@ -362,7 +359,7 @@ export default function ListItemsClient({
         return;
       }
 
-      setCachedItems(
+      const nextItems = applyPendingBoughtToggles(
         (fallbackData ?? []).map((item) => ({
           ...item,
           created_by_name: item.created_by
@@ -373,8 +370,23 @@ export default function ListItemsClient({
           ),
         })) as ShoppingListItem[],
       );
+
+      setCachedItems(nextItems);
+
+      if (
+        !displayGroupCommitTimeoutRef.current &&
+        pendingBoughtTogglesRef.current.size === 0
+      ) {
+        syncDisplayGroupsToItems(nextItems);
+      }
     },
-    [listId, setCachedItems, supabase],
+    [
+      applyPendingBoughtToggles,
+      listId,
+      setCachedItems,
+      supabase,
+      syncDisplayGroupsToItems,
+    ],
   );
 
   const refreshItemsSoon = useCallback(() => {
@@ -393,22 +405,24 @@ export default function ListItemsClient({
 
       if (listCachedItems) {
         setItems(listCachedItems);
+        syncDisplayGroupsToItems(listCachedItems);
         setIsLoading(false);
       } else {
         setItems([]);
+        syncDisplayGroupsToItems([]);
         setIsLoading(true);
       }
 
-      setSettlingBoughtItemIds(new Set());
-      setSettlingPendingItemIds(new Set());
-      for (const itemSettleTimeoutId of boughtItemSettleTimeoutsRef.current.values()) {
-        window.clearTimeout(itemSettleTimeoutId);
+      pendingBoughtTogglesRef.current.clear();
+      if (displayGroupCommitTimeoutRef.current) {
+        window.clearTimeout(displayGroupCommitTimeoutRef.current);
+        displayGroupCommitTimeoutRef.current = null;
       }
-      boughtItemSettleTimeoutsRef.current.clear();
-      for (const itemSettleTimeoutId of pendingItemSettleTimeoutsRef.current.values()) {
-        window.clearTimeout(itemSettleTimeoutId);
+
+      for (const timeoutId of pendingToggleReleaseTimeoutsRef.current.values()) {
+        window.clearTimeout(timeoutId);
       }
-      pendingItemSettleTimeoutsRef.current.clear();
+      pendingToggleReleaseTimeoutsRef.current.clear();
 
       void loadItems();
     }, 0);
@@ -416,23 +430,23 @@ export default function ListItemsClient({
     return () => {
       window.clearTimeout(timeoutId);
     };
-  }, [listId, loadItems]);
+  }, [listId, loadItems, syncDisplayGroupsToItems]);
 
   useEffect(() => {
-    const boughtItemSettleTimeouts = boughtItemSettleTimeoutsRef.current;
-    const pendingItemSettleTimeouts = pendingItemSettleTimeoutsRef.current;
+    const pendingToggleReleaseTimeouts = pendingToggleReleaseTimeoutsRef.current;
+    const pendingBoughtToggles = pendingBoughtTogglesRef.current;
 
     return () => {
-      for (const timeoutId of boughtItemSettleTimeouts.values()) {
+      if (displayGroupCommitTimeoutRef.current) {
+        window.clearTimeout(displayGroupCommitTimeoutRef.current);
+      }
+
+      for (const timeoutId of pendingToggleReleaseTimeouts.values()) {
         window.clearTimeout(timeoutId);
       }
 
-      for (const timeoutId of pendingItemSettleTimeouts.values()) {
-        window.clearTimeout(timeoutId);
-      }
-
-      boughtItemSettleTimeouts.clear();
-      pendingItemSettleTimeouts.clear();
+      pendingToggleReleaseTimeouts.clear();
+      pendingBoughtToggles.clear();
     };
   }, []);
 
@@ -633,13 +647,9 @@ export default function ListItemsClient({
   async function toggleItem(item: ShoppingListItem) {
     const nextValue = !item.is_bought;
 
-    if (nextValue) {
-      releaseSettlingPendingItem(item.id);
-      holdBoughtItemInPlace(item.id);
-    } else {
-      releaseSettlingBoughtItem(item.id);
-      holdPendingItemInPlace(item.id);
-    }
+    pendingBoughtTogglesRef.current.set(item.id, {
+      isBought: nextValue,
+    });
 
     setCachedItems((currentItems) =>
       currentItems.map((currentItem) =>
@@ -648,6 +658,7 @@ export default function ListItemsClient({
           : currentItem,
       ),
     );
+    scheduleDisplayGroupCommit();
 
     const { error } = await supabase
       .from("shopping_list_items")
@@ -656,14 +667,17 @@ export default function ListItemsClient({
 
     if (error) {
       setMessage(error.message);
-      releaseSettlingBoughtItem(item.id);
-      releaseSettlingPendingItem(item.id);
+      clearPendingBoughtToggle(item.id);
       setCachedItems((currentItems) =>
         currentItems.map((currentItem) =>
           currentItem.id === item.id ? item : currentItem,
         ),
       );
+      scheduleDisplayGroupCommit();
+      return;
     }
+
+    releasePendingBoughtToggleSoon(item.id);
   }
 
   async function updateItemQuantity(item: ShoppingListItem, nextQuantity: number) {
@@ -811,11 +825,11 @@ export default function ListItemsClient({
   }
 
   function requestClearBoughtItems() {
-    if (boughtItems.length === 0) {
+    if (boughtItemsCount === 0) {
       return;
     }
 
-    setPendingConfirmation({ type: "clearBought", count: boughtItems.length });
+    setPendingConfirmation({ type: "clearBought", count: boughtItemsCount });
   }
 
   function requestClearBoughtItemsFromMenu() {
@@ -825,12 +839,24 @@ export default function ListItemsClient({
 
   async function clearBoughtItems() {
     const previousItems = items;
+    const boughtItemIds = new Set(
+      items.filter((item) => item.is_bought).map((item) => item.id),
+    );
 
     setMessage("");
     setClearingMode("bought");
     setCachedItems((currentItems) =>
       currentItems.filter((currentItem) => !currentItem.is_bought),
     );
+    setDisplayGroupByItemId((currentGroups) => {
+      const nextGroups = new Map(currentGroups);
+
+      for (const itemId of boughtItemIds) {
+        nextGroups.delete(itemId);
+      }
+
+      return nextGroups;
+    });
 
     const { error } = await supabase
       .from("shopping_list_items")
@@ -843,6 +869,7 @@ export default function ListItemsClient({
     if (error) {
       setMessage(error.message);
       setCachedItems(previousItems);
+      syncDisplayGroupsToItems(previousItems);
     }
   }
 
@@ -865,6 +892,7 @@ export default function ListItemsClient({
     setMessage("");
     setClearingMode("all");
     setCachedItems([]);
+    syncDisplayGroupsToItems([]);
 
     const { error } = await supabase
       .from("shopping_list_items")
@@ -876,6 +904,7 @@ export default function ListItemsClient({
     if (error) {
       setMessage(error.message);
       setCachedItems(previousItems);
+      syncDisplayGroupsToItems(previousItems);
     }
   }
 
@@ -1208,14 +1237,14 @@ export default function ListItemsClient({
           <div className="rounded-full bg-blue-50 px-2 py-1.5">
             <span className="text-xs font-bold text-[#3880ff]">לקנייה</span>
             <span className="ms-1 text-sm font-black text-[#3880ff]">
-              {pendingItems.length}
+              {pendingItemsCount}
             </span>
           </div>
 
           <div className="rounded-full bg-slate-100 px-2 py-1.5">
             <span className="text-xs font-bold text-slate-500">נקנו</span>
             <span className="ms-1 text-sm font-black text-slate-950">
-              {boughtItems.length}
+              {boughtItemsCount}
             </span>
           </div>
           </div>
@@ -1239,7 +1268,7 @@ export default function ListItemsClient({
                   <button
                     type="button"
                     onClick={requestClearBoughtItemsFromMenu}
-                    disabled={boughtItems.length === 0 || clearingMode !== null}
+                    disabled={boughtItemsCount === 0 || clearingMode !== null}
                     className="block w-full px-4 py-3 text-right text-sm font-bold text-slate-700 transition hover:bg-slate-50 disabled:text-slate-300"
                   >
                     נקה נקנו
