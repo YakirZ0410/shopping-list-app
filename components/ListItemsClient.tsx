@@ -49,7 +49,7 @@ type PendingConfirmation =
   | { type: "clearAll"; count: number };
 
 const shoppingListItemsCache = new Map<string, ShoppingListItem[]>();
-const BOUGHT_ITEM_SETTLE_DELAY_MS = 650;
+const ITEM_SETTLE_DELAY_MS = 650;
 
 function parseItemNames(value: string) {
   return value
@@ -131,6 +131,7 @@ export default function ListItemsClient({
   const inputRef = useRef<HTMLInputElement>(null);
   const refreshTimeoutRef = useRef<number | null>(null);
   const boughtItemSettleTimeoutsRef = useRef<Map<string, number>>(new Map());
+  const pendingItemSettleTimeoutsRef = useRef<Map<string, number>>(new Map());
   const cachedItems = shoppingListItemsCache.get(listId);
 
   const [items, setItems] = useState<ShoppingListItem[]>(() => cachedItems ?? []);
@@ -155,6 +156,9 @@ export default function ListItemsClient({
   const [recentlyDeletedItem, setRecentlyDeletedItem] =
     useState<ShoppingListItem | null>(null);
   const [settlingBoughtItemIds, setSettlingBoughtItemIds] = useState<
+    Set<string>
+  >(() => new Set());
+  const [settlingPendingItemIds, setSettlingPendingItemIds] = useState<
     Set<string>
   >(() => new Set());
 
@@ -214,24 +218,76 @@ export default function ListItemsClient({
         nextIds.delete(itemId);
         return nextIds;
       });
-    }, BOUGHT_ITEM_SETTLE_DELAY_MS);
+    }, ITEM_SETTLE_DELAY_MS);
 
     boughtItemSettleTimeoutsRef.current.set(itemId, timeoutId);
+  }, []);
+
+  const releaseSettlingPendingItem = useCallback((itemId: string) => {
+    const timeoutId = pendingItemSettleTimeoutsRef.current.get(itemId);
+
+    if (timeoutId) {
+      window.clearTimeout(timeoutId);
+      pendingItemSettleTimeoutsRef.current.delete(itemId);
+    }
+
+    setSettlingPendingItemIds((currentIds) => {
+      if (!currentIds.has(itemId)) {
+        return currentIds;
+      }
+
+      const nextIds = new Set(currentIds);
+      nextIds.delete(itemId);
+      return nextIds;
+    });
+  }, []);
+
+  const holdPendingItemInPlace = useCallback((itemId: string) => {
+    const existingTimeoutId = pendingItemSettleTimeoutsRef.current.get(itemId);
+
+    if (existingTimeoutId) {
+      window.clearTimeout(existingTimeoutId);
+    }
+
+    setSettlingPendingItemIds((currentIds) => {
+      const nextIds = new Set(currentIds);
+      nextIds.add(itemId);
+      return nextIds;
+    });
+
+    const timeoutId = window.setTimeout(() => {
+      pendingItemSettleTimeoutsRef.current.delete(itemId);
+      setSettlingPendingItemIds((currentIds) => {
+        if (!currentIds.has(itemId)) {
+          return currentIds;
+        }
+
+        const nextIds = new Set(currentIds);
+        nextIds.delete(itemId);
+        return nextIds;
+      });
+    }, ITEM_SETTLE_DELAY_MS);
+
+    pendingItemSettleTimeoutsRef.current.set(itemId, timeoutId);
   }, []);
 
   const pendingItems = useMemo(
     () =>
       items.filter(
-        (item) => !item.is_bought || settlingBoughtItemIds.has(item.id),
+        (item) =>
+          (!item.is_bought && !settlingPendingItemIds.has(item.id)) ||
+          settlingBoughtItemIds.has(item.id),
       ),
-    [items, settlingBoughtItemIds],
+    [items, settlingBoughtItemIds, settlingPendingItemIds],
   );
   const boughtItems = useMemo(
     () =>
       items.filter(
-        (item) => item.is_bought && !settlingBoughtItemIds.has(item.id),
+        (item) =>
+          (item.is_bought && !settlingBoughtItemIds.has(item.id)) ||
+          settlingPendingItemIds.has(item.id),
       ),
-    [items, settlingBoughtItemIds],
+    [items, settlingBoughtItemIds, settlingPendingItemIds],
   );
   const searchTerm = normalizeItemName(newItemText);
   const isSearching = searchTerm.length > 0;
@@ -344,10 +400,15 @@ export default function ListItemsClient({
       }
 
       setSettlingBoughtItemIds(new Set());
+      setSettlingPendingItemIds(new Set());
       for (const itemSettleTimeoutId of boughtItemSettleTimeoutsRef.current.values()) {
         window.clearTimeout(itemSettleTimeoutId);
       }
       boughtItemSettleTimeoutsRef.current.clear();
+      for (const itemSettleTimeoutId of pendingItemSettleTimeoutsRef.current.values()) {
+        window.clearTimeout(itemSettleTimeoutId);
+      }
+      pendingItemSettleTimeoutsRef.current.clear();
 
       void loadItems();
     }, 0);
@@ -359,13 +420,19 @@ export default function ListItemsClient({
 
   useEffect(() => {
     const boughtItemSettleTimeouts = boughtItemSettleTimeoutsRef.current;
+    const pendingItemSettleTimeouts = pendingItemSettleTimeoutsRef.current;
 
     return () => {
       for (const timeoutId of boughtItemSettleTimeouts.values()) {
         window.clearTimeout(timeoutId);
       }
 
+      for (const timeoutId of pendingItemSettleTimeouts.values()) {
+        window.clearTimeout(timeoutId);
+      }
+
       boughtItemSettleTimeouts.clear();
+      pendingItemSettleTimeouts.clear();
     };
   }, []);
 
@@ -567,9 +634,11 @@ export default function ListItemsClient({
     const nextValue = !item.is_bought;
 
     if (nextValue) {
+      releaseSettlingPendingItem(item.id);
       holdBoughtItemInPlace(item.id);
     } else {
       releaseSettlingBoughtItem(item.id);
+      holdPendingItemInPlace(item.id);
     }
 
     setCachedItems((currentItems) =>
@@ -588,6 +657,7 @@ export default function ListItemsClient({
     if (error) {
       setMessage(error.message);
       releaseSettlingBoughtItem(item.id);
+      releaseSettlingPendingItem(item.id);
       setCachedItems((currentItems) =>
         currentItems.map((currentItem) =>
           currentItem.id === item.id ? item : currentItem,
