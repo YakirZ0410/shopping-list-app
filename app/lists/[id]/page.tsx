@@ -4,6 +4,7 @@ import { AppHeader, AppPanel, AppScreen } from "@/components/AppUi";
 import CopyAccessCodeButton from "@/components/CopyAccessCodeButton";
 import ListItemsClient from "@/components/ListItemsClient";
 import ListManagementPanel from "@/components/ListManagementPanel";
+import LoadingProgress from "@/components/LoadingProgress";
 import { createClient } from "@/lib/supabaseClient";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -211,9 +212,12 @@ export default function ListDetailsPage() {
   if (isLoading) {
     return (
       <AppScreen>
-        <AppHeader title="טוען רשימה..." backHref="/lists" />
-        <AppPanel>
-          <p className="text-sm text-slate-500">טוען את פרטי הרשימה.</p>
+        <AppHeader title="טוען רשימה..." backHref="/lists" compact />
+        <AppPanel className="p-0">
+          <LoadingProgress
+            label="פותח רשימה..."
+            detail="טוען פרטים ומכין מוצרים"
+          />
         </AppPanel>
       </AppScreen>
     );

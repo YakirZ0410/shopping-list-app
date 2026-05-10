@@ -2,6 +2,7 @@
 
 import { AppPanel } from "@/components/AppUi";
 import ConfirmDialog from "@/components/ConfirmDialog";
+import LoadingProgress from "@/components/LoadingProgress";
 import { createClient } from "@/lib/supabaseClient";
 import {
   BrushCleaning,
@@ -1298,27 +1299,10 @@ export default function ListItemsClient({
       )}
 
       {isLoading && (
-        <div className="space-y-4 p-4">
-          <div>
-            <div className="mb-3 h-4 w-28 animate-pulse rounded-full bg-slate-200" />
-            <div className="divide-y divide-slate-100 overflow-hidden rounded-2xl bg-white">
-              {[1, 2, 3].map((item) => (
-                <div
-                  key={item}
-                  className="flex min-h-16 items-center gap-3 px-1 py-3"
-                >
-                  <div className="h-8 w-8 shrink-0 animate-pulse rounded-full bg-slate-200" />
-                  <div className="min-w-0 flex-1 space-y-2">
-                    <div className="h-4 w-2/3 animate-pulse rounded-full bg-slate-200" />
-                    <div className="h-3 w-1/3 animate-pulse rounded-full bg-slate-100" />
-                  </div>
-                  <div className="h-9 w-[5.5rem] shrink-0 animate-pulse rounded-full bg-slate-100" />
-                  <div className="h-10 w-10 shrink-0 animate-pulse rounded-full bg-slate-100" />
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
+        <LoadingProgress
+          label="טוען מוצרים..."
+          detail="מסנכרן את רשימת הקניות"
+        />
       )}
 
       {!isLoading && items.length === 0 && (

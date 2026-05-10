@@ -2,6 +2,7 @@
 
 import { AppButton, AppHeader, AppPanel, AppScreen } from "@/components/AppUi";
 import CopyAccessCodeButton from "@/components/CopyAccessCodeButton";
+import LoadingProgress from "@/components/LoadingProgress";
 import ListMembershipActionButton from "@/components/ListMembershipActionButton";
 import LogoutButton from "@/components/LogoutButton";
 import { createClient } from "@/lib/supabaseClient";
@@ -462,28 +463,10 @@ export default function ListsPage() {
         </div>
 
         {isLoading && (
-          <div className="space-y-3 bg-[#f4f5f8] p-3">
-            {[1, 2, 3].map((item) => (
-              <div
-                key={item}
-                className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm shadow-slate-200/70"
-              >
-                <div className="flex items-center gap-3 p-4">
-                  <div className="min-w-0 flex-1">
-                    <div className="mb-2 h-5 w-16 animate-pulse rounded-full bg-slate-100" />
-                    <div className="h-5 w-3/5 animate-pulse rounded-full bg-slate-200" />
-                    <div className="mt-2 h-4 w-4/5 animate-pulse rounded-full bg-slate-100" />
-                    <div className="mt-3 h-1.5 w-full animate-pulse rounded-full bg-slate-100" />
-                  </div>
-                  <div className="h-9 w-9 shrink-0 animate-pulse rounded-full bg-blue-50" />
-                </div>
-                <div className="flex items-center justify-between gap-3 border-t border-slate-100 bg-slate-50/70 px-4 py-3">
-                  <div className="h-8 w-36 animate-pulse rounded-full bg-slate-100" />
-                  <div className="h-8 w-20 animate-pulse rounded-full bg-red-50" />
-                </div>
-              </div>
-            ))}
-          </div>
+          <LoadingProgress
+            label="טוען רשימות..."
+            detail="בודק את הרשימות והסטטוס שלהן"
+          />
         )}
 
         {!isLoading && errorMessage && (
